@@ -1,17 +1,100 @@
 <?php
 /**
- * AMETHYST PINTU LOGIC v10.0 - ULTIMATE CRITICAL SCANNER
- * - Scans Current Directory ($currentPath)
- * - Detects everything (including itself)
- * - Fixed HTML Output for Amethyst Shell UI
+ * Pussy Finder - Cyberpunk Edition (Uploader Hunter Mod)
+ * UI: Vibrant Neon Purple & Blue
  */
 
-// 1. Ambil directory dari shell logic
-$dir = (isset($currentPath) && !empty($currentPath)) ? $currentPath : getcwd();
-$found = [];
+$minute = 15;
+$limit = (60 * $minute); 
+ini_set('memory_limit', '-1');
+ini_set('max_execution_time', $limit);
+set_time_limit($limit);
 
-// --- DATABASE DANGER FUNCTIONS (SEMUA CRITICAL) ---
-$f_critical = [
+function recursiveScan($directory, &$entries_array = array())
+{
+    $handle = @opendir($directory);
+    if ($handle) {
+        while (($entry = readdir($handle)) !== false) {
+            if ($entry == '.' || $entry == '..') continue;
+            $full_entry = $directory . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($full_entry)) {
+                if (is_readable($full_entry)) {
+                    $entries_array = recursiveScan($full_entry, $entries_array);
+                } else {
+                    $entries_array['folder_blocked'][] = $full_entry;
+                }
+            } elseif (is_file($full_entry) && is_readable($full_entry)) {
+                $entries_array['file_list'][] = $full_entry;
+            }
+        }
+        closedir($handle);
+    } else {
+        $entries_array['folder_blocked'][] = $directory;
+    }
+    return $entries_array;
+}
+
+function sortByLastModified($files)
+{
+    if (empty($files)) return array();
+    @array_multisort(array_map('filemtime', $files), SORT_DESC, $files);
+    return $files;
+}
+
+function getProcessedData($path)
+{
+    $result = recursiveScan($path);
+    $allFiles = isset($result['file_list']) ? $result['file_list'] : array();
+    $blockedFolders = isset($result['folder_blocked']) ? $result['folder_blocked'] : array();
+    $filteredFiles = array();
+
+    // Tambah ekstensi yang sering dipakai bypass uploader
+    $suspectExts = array('php', 'pht', 'phtml', 'php3', 'php4', 'php5', 'phps', 'phar', 'htaccess', 'suspected');
+
+    foreach ($allFiles as $file) {
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+        $isSuspect = false;
+        foreach($suspectExts as $s) {
+            if (stripos($ext, $s) !== false) { $isSuspect = true; break; }
+        }
+        
+        if ($isSuspect) {
+            $filteredFiles[] = $file;
+        }
+    }
+    return array('files' => sortByLastModified($filteredFiles), 'blocked' => $blockedFolders);
+}
+
+function getFileTokens($filename)
+{
+    $fileContent = @file_get_contents($filename);
+    if (!$fileContent) return array();
+    
+    // Logika Tambahan: Deteksi String Form Upload (Non-Token)
+    $extraMatches = array();
+    if (stripos($fileContent, 'type="file"') !== false) $extraMatches[] = 'html_file_input';
+    if (stripos($fileContent, 'multipart/form-data') !== false) $extraMatches[] = 'html_form_enctype';
+    if (stripos($fileContent, 'name="upload"') !== false) $extraMatches[] = 'upload_button_name';
+
+    $fileContent = preg_replace('/<\?([^p=\w])/m', '<?php ', $fileContent);
+    $token = token_get_all($fileContent);
+    $output = array();
+    foreach ($token as $t) { 
+        if (isset($t[1])) $output[] = strtolower(trim($t[1])); 
+    }
+    
+    $finalTokens = array_values(array_unique(array_filter($output)));
+    return array_merge($finalTokens, $extraMatches);
+}
+
+function compareTokens($tokenNeedles, $tokenHaystack)
+{
+    return array_intersect($tokenNeedles, $tokenHaystack);
+}
+
+// DAFTAR TOKEN DIPERLUAS (Fungsi Bawaan + Penanda Uploader)
+$tokenNeedles = array(
+    // Original & Obfuscation
     'base64_decode', 'rawurldecode', 'urldecode', 'gzinflate', 'gzuncompress', 'str_rot13',
     'convert_uu', 'htmlspecialchars_decode', 'bin2hex', 'hex2bin', 'hexdec', 'chr', 'strrev',
     'goto', 'implode', 'strtr', 'extract', 'parse_str', 'substr', 'mb_substr', 'str_replace',
@@ -20,72 +103,87 @@ $f_critical = [
     'assert', 'posix_kill', 'posix_getuid', 'getenv', 'phpinfo', 'mysqli_query', 'mysql_query',
     'file_put_contents', 'file_get_contents', 'move_uploaded_file', '$_files', 'copy',
     'include', 'require', 'mail', 'curl_init', 'symlink', '__halt_compiler',
-    'fwrite', 'fopen', 'fputs', 'is_uploaded_file', '$_post', '$_get', '$_request',
-    'html_file_input', 'html_form_enctype', 'upload_button_name'
-];
-
-// 2. Scan file di folder aktif
-if (is_dir($dir)) {
-    $files = scandir($dir);
-    foreach ($files as $file) {
-        $fPath = $dir . DIRECTORY_SEPARATOR . $file;
-        
-        // Scan file PHP (Hapus pengecekan basename agar bisa scan diri sendiri)
-        if (is_file($fPath) && pathinfo($file, PATHINFO_EXTENSION) == 'php') {
-            
-            $content = @file_get_contents($fPath);
-            if (empty($content)) continue;
-
-            $score = 0; 
-            $reasons = [];
-
-            // Cek semua fungsi critical
-            foreach($f_critical as $f) { 
-                if(stripos($content, $f) !== false) { 
-                    $score += 60; 
-                    $reasons[] = $f; 
-                } 
-            }
-
-            // Heuristic Pattern
-            if (preg_match('/eval\s*\(\s*(base64_decode|gzinflate|\$_|str_rot13)/i', $content)) {
-                $score += 100;
-                $reasons[] = "BACKDOOR_PATTERN";
-            }
-
-            if ($score >= 60) {
-                $found[] = [
-                    'name' => $file,
-                    'score' => $score,
-                    'reasons' => array_unique($reasons)
-                ];
-            }
-        }
-    }
-}
-
-// --- 3. GENERATE OUTPUT KE VARIABEL $scan_result ---
-if (empty($found)) {
-    $scan_result = "<div style='color:#00ff00; padding:10px; background:rgba(0,255,0,0.1); border:1px solid #00ff00;'>✅ Folder aktif aman (Tidak ada fungsi mencurigakan).</div>";
-} else {
-    $html = "<div style='background:#111; padding:10px; border:1px solid #333; font-family:monospace;'>";
-    $html .= "<h4 style='color:#ccc; margin-bottom:10px;'>📂 Scan Results in: <span style='color:#00ff00;'>$dir</span></h4>";
-    $html .= "<table style='width:100%; border-collapse:collapse; font-size:11px; color:#aaa;'>";
-    $html .= "<tr style='background:#222; color:#eee;'><th style='padding:8px; text-align:left; border:1px solid #333;'>FILE</th><th style='padding:8px; text-align:left; border:1px solid #333;'>REASONS</th><th style='padding:8px; text-align:center; border:1px solid #333;'>SCORE</th></tr>";
     
-    foreach ($found as $item) {
-        $color = ($item['score'] >= 100) ? "#ff4d4d" : "#ffa500";
-        $isSelf = ($item['name'] == basename($_SERVER['PHP_SELF'])) ? " <span style='color:#555;'>(This Scanner)</span>" : "";
-        
-        $html .= "<tr>";
-        $html .= "<td style='padding:8px; border:1px solid #333;'><b style='color:$color;'>".$item['name']."</b>$isSelf</td>";
-        $html .= "<td style='padding:8px; border:1px solid #333; font-size:10px; color:#777;'>".implode(", ", $item['reasons'])."</td>";
-        $html .= "<td style='padding:8px; border:1px solid #333; text-align:center; font-weight:bold; color:$color;'>".$item['score']."</td>";
-        $html .= "</tr>";
-    }
-    $html .= "</table></div>";
-    $scan_result = $html;
-}
-
-// PENTING: Jangan gunakan echo di sini jika shell Anda menggunakan variabel $scan_result untuk output.
+    // TAMBAHAN UNTUK UPLOADER HUNTER
+    'fwrite', 'fopen', 'fputs', 'is_uploaded_file', '$_post', '$_get', '$_request',
+    'html_file_input', 'html_form_enctype', 'upload_button_name' 
+);
 ?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pussy Finder - Uploader Hunter Edition</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css?family=Rajdhani:500,700&display=swap');
+        body { font-family: 'Rajdhani', sans-serif; background: #0f0c29; background: linear-gradient(to right, #24243e, #302b63, #0f0c29); color: #e0e0e0; padding: 20px; min-height: 100vh; }
+        .container { max-width: 1000px; margin: auto; background: rgba(0, 0, 0, 0.6); padding: 30px; border-radius: 15px; border: 1px solid #bc13fe; box-shadow: 0 0 20px rgba(188, 19, 254, 0.2); }
+        h2 { text-align: center; color: #bc13fe; text-shadow: 0 0 10px #bc13fe; letter-spacing: 5px; font-size: 40px; margin-top: 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 25px; background: rgba(255, 255, 255, 0.05); }
+        th, td { padding: 15px; border-bottom: 1px solid rgba(188, 19, 254, 0.3); text-align: left; font-size: 15px; }
+        th { color: #00f2fe; text-transform: uppercase; border-bottom: 2px solid #00f2fe; }
+        input[type=text] { background: rgba(0,0,0,0.5); border: 1px solid #00f2fe; color: #00f2fe; padding: 12px; width: 75%; border-radius: 5px; outline: none; font-size: 16px; box-shadow: inset 0 0 5px #00f2fe; }
+        input[type=submit] { background: #bc13fe; border: none; color: #fff; padding: 12px 25px; cursor: pointer; font-weight: bold; border-radius: 5px; text-shadow: 0 0 5px #fff; transition: 0.4s; }
+        input[type=submit]:hover { background: #00f2fe; box-shadow: 0 0 15px #00f2fe; color: #000; }
+        .file-link { color: #00f2fe; text-decoration: none; font-weight: bold; transition: 0.3s; }
+        .file-link:hover { color: #bc13fe; text-shadow: 0 0 8px #bc13fe; }
+        .res-match { color: #ff0055; font-weight: bold; text-shadow: 0 0 5px #ff0055; }
+        .res-warn { color: #f9d423; font-weight: bold; }
+        small { color: #aaa; display: block; margin-top: 5px; font-style: italic; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>PUSSY FINDER</h2>
+    <form method="post">
+        <div style="text-align: center;">
+            <input type="text" name="dir" placeholder="Enter path..." value="<?= isset($_POST['dir']) ? $_POST['dir'] : getcwd() ?>">
+            <input type="submit" name="submit" value="RUN SCAN">
+        </div>
+    </form>
+
+    <?php if (isset($_POST['submit'])): ?>
+        <table>
+            <thead>
+                <tr><th>Scan Report Logs - Uploader Hunter Mode</th></tr>
+            </thead>
+            <tbody>
+                <?php
+                $path = $_POST['dir'];
+                $data = getProcessedData($path);
+                $docRoot = str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']);
+
+                if (!empty($data['blocked'])) {
+                    foreach ($data['blocked'] as $folder) {
+                        echo "<tr><td><span class='res-warn'>[!] LOCKED:</span> <span style='color:#f9d423'>$folder</span></td></tr>";
+                    }
+                }
+
+                $foundCount = 0;
+                foreach ($data['files'] as $file) {
+                    $tokens = getFileTokens($file);
+                    $matches = compareTokens($tokenNeedles, $tokens);
+                    if (!empty($matches)) {
+                        $foundCount++;
+                        $realPath = str_replace('\\', '/', $file);
+                        $webPath = str_replace($docRoot, '', $realPath);
+                        $isLinkable = (strpos($realPath, $docRoot) !== false);
+
+                        echo "<tr><td>";
+                        echo "<span class='res-match'>[POTENTIAL UPLOADER/SHELL]</span> ";
+                        if ($isLinkable) {
+                            echo "<a class='file-link' href='$webPath' target='_blank'>$realPath</a>";
+                        } else {
+                            echo "<span style='color:#00f2fe'>$realPath</span>";
+                        }
+                        echo "<small>Critical Tokens: " . implode(', ', $matches) . "</small>";
+                        echo "</td></tr>";
+                    }
+                }
+                if ($foundCount == 0 && empty($data['blocked'])) echo "<tr><td>System Clean. No suspicious uploaders detected.</td></tr>";
+                ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+</div>
+</body>
+</html>
