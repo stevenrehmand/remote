@@ -1,20 +1,16 @@
 <?php
 /**
- * AMETHYST PINTU LOGIC v9.0 - SELF-DETECTION SCANNER
- * Bisa mendeteksi file shell lain DAN dirinya sendiri.
+ * AMETHYST PINTU LOGIC v10.0 - ULTIMATE CRITICAL SCANNER
+ * - Scans Current Directory ($currentPath)
+ * - Detects everything (including itself)
+ * - Fixed HTML Output for Amethyst Shell UI
  */
 
-// 1. Tangkap direktori (Active Directory)
+// 1. Ambil directory dari shell logic
 $dir = (isset($currentPath) && !empty($currentPath)) ? $currentPath : getcwd();
-
-if (!is_dir($dir)) {
-    echo "Error: Directory not found.";
-    return;
-}
-
 $found = [];
 
-// --- DATABASE DANGER FUNCTIONS ---
+// --- DATABASE DANGER FUNCTIONS (SEMUA CRITICAL) ---
 $f_critical = [
     'base64_decode', 'rawurldecode', 'urldecode', 'gzinflate', 'gzuncompress', 'str_rot13',
     'convert_uu', 'htmlspecialchars_decode', 'bin2hex', 'hex2bin', 'hexdec', 'chr', 'strrev',
@@ -28,83 +24,68 @@ $f_critical = [
     'html_file_input', 'html_form_enctype', 'upload_button_name'
 ];
 
-// 2. Ambil daftar file
-$files = scandir($dir);
-
-foreach ($files as $file) {
-    $fPath = $dir . DIRECTORY_SEPARATOR . $file;
-    
-    // PENGATURAN: Menghapus pengecekan 'basename' agar scanner bisa menscan dirinya sendiri
-    if (is_file($fPath) && pathinfo($file, PATHINFO_EXTENSION) == 'php') {
+// 2. Scan file di folder aktif
+if (is_dir($dir)) {
+    $files = scandir($dir);
+    foreach ($files as $file) {
+        $fPath = $dir . DIRECTORY_SEPARATOR . $file;
         
-        $content = @file_get_contents($fPath);
-        if (empty($content)) continue;
+        // Scan file PHP (Hapus pengecekan basename agar bisa scan diri sendiri)
+        if (is_file($fPath) && pathinfo($file, PATHINFO_EXTENSION) == 'php') {
+            
+            $content = @file_get_contents($fPath);
+            if (empty($content)) continue;
 
-        $score = 0; 
-        $reasons = [];
+            $score = 0; 
+            $reasons = [];
 
-        // Cek semua fungsi critical
-        foreach($f_critical as $f) { 
-            if(stripos($content, $f) !== false) { 
-                $score += 60; 
-                $reasons[] = $f; 
-            } 
-        }
+            // Cek semua fungsi critical
+            foreach($f_critical as $f) { 
+                if(stripos($content, $f) !== false) { 
+                    $score += 60; 
+                    $reasons[] = $f; 
+                } 
+            }
 
-        // Heuristic Pattern
-        if (preg_match('/eval\s*\(\s*(base64_decode|gzinflate|\$_|str_rot13)/i', $content)) {
-            $score += 100;
-            $reasons[] = "BACKDOOR_PATTERN";
-        }
+            // Heuristic Pattern
+            if (preg_match('/eval\s*\(\s*(base64_decode|gzinflate|\$_|str_rot13)/i', $content)) {
+                $score += 100;
+                $reasons[] = "BACKDOOR_PATTERN";
+            }
 
-        if ($score >= 60) {
-            $found[] = [
-                'name' => $file,
-                'score' => $score,
-                'reasons' => array_unique($reasons)
-            ];
+            if ($score >= 60) {
+                $found[] = [
+                    'name' => $file,
+                    'score' => $score,
+                    'reasons' => array_unique($reasons)
+                ];
+            }
         }
     }
 }
 
-// --- 3. OUTPUT GENERATOR ---
-// Pastikan output ini diecho langsung agar shell merendernya sebagai HTML
+// --- 3. GENERATE OUTPUT KE VARIABEL $scan_result ---
 if (empty($found)) {
-    echo "<div style='color:#00ff00; padding:10px; border:1px solid #00ff00; background:rgba(0,255,0,0.1); font-family:sans-serif;'>✅ Folder aktif aman.</div>";
+    $scan_result = "<div style='color:#00ff00; padding:10px; background:rgba(0,255,0,0.1); border:1px solid #00ff00;'>✅ Folder aktif aman (Tidak ada fungsi mencurigakan).</div>";
 } else {
-    ?>
-    <div style="background:#111; padding:10px; border:1px solid #333; font-family:monospace;">
-        <h4 style="color:#ccc; margin:0 0 10px 0;">📂 Scan Results in: <span style="color:#00ff00;"><?php echo $dir; ?></span></h4>
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:12px; color:#aaa;">
-                <thead>
-                    <tr style="background:#222; color:#eee; text-align:left;">
-                        <th style="padding:10px; border:1px solid #333;">FILENAME</th>
-                        <th style="padding:10px; border:1px solid #333;">CRITICAL FUNCTIONS DETECTED</th>
-                        <th style="padding:10px; border:1px solid #333; text-align:right;">SCORE</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($found as $item): 
-                        $color = ($item['score'] >= 100) ? "#ff4d4d" : "#ffa500";
-                        $isSelf = ($item['name'] == basename($_SERVER['PHP_SELF'])) ? " <i style='color:#555;'>(This Scanner)</i>" : "";
-                    ?>
-                    <tr style="border-bottom:1px solid #222;">
-                        <td style="padding:10px; border:1px solid #333;">
-                            <b style="color:<?php echo $color; ?>;"><?php echo $item['name']; ?></b><?php echo $isSelf; ?>
-                        </td>
-                        <td style="padding:10px; border:1px solid #333; font-size:10px; color:#888;">
-                            <?php echo implode(", ", $item['reasons']); ?>
-                        </td>
-                        <td style="padding:10px; border:1px solid #333; text-align:right; font-weight:bold; color:<?php echo $color; ?>;">
-                            <?php echo $item['score']; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-    <?php
+    $html = "<div style='background:#111; padding:10px; border:1px solid #333; font-family:monospace;'>";
+    $html .= "<h4 style='color:#ccc; margin-bottom:10px;'>📂 Scan Results in: <span style='color:#00ff00;'>$dir</span></h4>";
+    $html .= "<table style='width:100%; border-collapse:collapse; font-size:11px; color:#aaa;'>";
+    $html .= "<tr style='background:#222; color:#eee;'><th style='padding:8px; text-align:left; border:1px solid #333;'>FILE</th><th style='padding:8px; text-align:left; border:1px solid #333;'>REASONS</th><th style='padding:8px; text-align:center; border:1px solid #333;'>SCORE</th></tr>";
+    
+    foreach ($found as $item) {
+        $color = ($item['score'] >= 100) ? "#ff4d4d" : "#ffa500";
+        $isSelf = ($item['name'] == basename($_SERVER['PHP_SELF'])) ? " <span style='color:#555;'>(This Scanner)</span>" : "";
+        
+        $html .= "<tr>";
+        $html .= "<td style='padding:8px; border:1px solid #333;'><b style='color:$color;'>".$item['name']."</b>$isSelf</td>";
+        $html .= "<td style='padding:8px; border:1px solid #333; font-size:10px; color:#777;'>".implode(", ", $item['reasons'])."</td>";
+        $html .= "<td style='padding:8px; border:1px solid #333; text-align:center; font-weight:bold; color:$color;'>".$item['score']."</td>";
+        $html .= "</tr>";
+    }
+    $html .= "</table></div>";
+    $scan_result = $html;
 }
+
+// PENTING: Jangan gunakan echo di sini jika shell Anda menggunakan variabel $scan_result untuk output.
 ?>
