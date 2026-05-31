@@ -1,0 +1,80 @@
+<?php
+/**
+ * AMETHYST PINTU LOGIC v3.8 - ULTIMATE DATABASE
+ * Features: URL Mapping, Instant Delete, 150+ Danger Functions & Heuristics.
+ */
+
+$dir = $currentPath;
+$files = scandir($dir);
+$found = [];
+
+// --- MAPPING URL UNTUK TOMBOL VIEW ---
+$protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http");
+$host = $_SERVER['HTTP_HOST'];
+$docRoot = str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']);
+$webPath = str_replace('\\', '/', $dir);
+$relative = str_replace($docRoot, '', $webPath);
+$baseUrl = $protocol . "://" . $host . $relative . "/";
+
+// --- DATABASE FUNGSI BERBAHAYA (INTEGRATED) ---
+$f_shell    = ['eval','exec','shell_exec','system','passthru','pcntl_fork','fsockopen','proc_open','popen','assert','posix_kill','posix_setpgid','posix_setsid','posix_setuid','proc_nice','proc_close','proc_terminate','apache_child_terminate','create_function'];
+$f_obfus    = ['base64_decode','rawurldecode','urldecode','gzinflate','gzuncompress','str_rot13','convert_uu','htmlspecialchars_decode','bin2hex','hex2bin','hexdec','chr','strrev','goto','implode','strtr','extract','parse_str','substr','mb_substr','str_replace','substr_replace','preg_replace','exif_read_data','readgzfile'];
+$f_info     = ['posix_getuid','posix_geteuid','posix_getegid','posix_getpwuid','posix_getgrgid','posix_mkfifo','posix_getlogin','posix_ttyname','getenv','proc_get_status','get_cfg_var','disk_free_space','disk_total_space','diskfreespace','getlastmo','getmyinode','getmypid','getmyuid','getmygid','fileowner','filegroup','get_current_user','pathinfo','getcwd','sys_get_temp_dir','basename','phpinfo'];
+$f_io       = ['fopen','file_put_contents','file_get_contents','url_get_contents','stream_get_meta_data','move_uploaded_file','copy','include','include_once','require','require_once','fwrite','fputs','is_uploaded_file','symlink'];
+$f_misc     = ['mail','putenv','curl_init','tmpfile','allow_url_fopen','ini_set','set_time_limit','session_start','error_reporting','get_magic_quotes_gpc','__halt_compiler'];
+
+foreach ($files as $file) {
+    $fPath = $dir . DIRECTORY_SEPARATOR . $file;
+    // Jangan scan diri sendiri atau folder
+    if (is_file($fPath) && pathinfo($file, PATHINFO_EXTENSION) == 'php' && $file != basename($_SERVER['PHP_SELF'])) {
+        $content = file_get_contents($fPath);
+        $score = 0; $reasons = [];
+
+        // Scan Categories
+        foreach($f_shell as $f) { if(preg_match('/'.$f.'\s*\(/i', $content)){ $score+=60; $reasons[]="Shell: $f()"; } }
+        foreach($f_obfus as $f) { if(preg_match('/'.$f.'\s*\(/i', $content)){ $score+=25; $reasons[]="Obfus: $f()"; } }
+        foreach($f_io as $f)    { if(preg_match('/'.$f.'\s*\(/i', $content)){ $score+=20; $reasons[]="I/O: $f()"; } }
+        foreach($f_info as $f)  { if(preg_match('/'.$f.'\s*\(/i', $content)){ $score+=5; } }
+        
+        // Uploader & Global Hunter
+        if(preg_match('/\$(?:_POST|_GET|_REQUEST|_FILES|GLOBALS)/i', $content)){ $score+=15; $reasons[]="User Input Global Found"; }
+        if(strpos(strtolower($content), 'upload') !== false){ $score+=10; $reasons[]="Upload Keyword Found"; }
+        if(strpos($content, '$auth_pass') !== false || strpos($content, '$password') !== false){ $score+=50; $reasons[]="Hardcoded Password Variable"; }
+
+        // Heuristic Bypass Check (Anti-Stealth)
+        if(preg_match('/\$[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*\s*\(\s*\$(?:_GET|_POST|_REQUEST)/i', $content)) { $score+=80; $reasons[]="Bypass: Variable Function Call"; }
+
+        if ($score >= 45) {
+            $found[] = ['name' => $file, 'score' => $score, 'reasons' => array_unique($reasons)];
+        }
+    }
+}
+
+// OUTPUT GENERATOR (HTML TABLE)
+if (empty($found)) {
+    $scan_result = "<div style='color:var(--success); font-weight:bold;'>✅ SCAN COMPLETED: No suspicious files found in this directory.</div>";
+} else {
+    $html = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse:collapse; min-width:600px;'>";
+    $html .= "<tr style='background:#000; color:#555; font-size:10px; text-transform:uppercase;'>
+                <th style='padding:10px; text-align:left;'>File & Score</th>
+                <th style='padding:10px; text-align:left;'>Danger Reasons</th>
+                <th style='padding:10px; text-align:right;'>Actions</th>
+              </tr>";
+    foreach ($found as $item) {
+        $color = ($item['score'] >= 100) ? "var(--danger)" : "var(--gold)";
+        $fileUrl = $baseUrl . $item['name'];
+        $html .= "<tr style='border-bottom:1px solid rgba(255,255,255,0.05);'>";
+        $html .= "<td style='padding:12px 10px;'><b style='color:$color;'>".$item['name']."</b><br><small style='color:#444;'>Score: ".$item['score']."</small></td>";
+        $html .= "<td style='padding:10px; font-size:11px; color:#aaa;'>".implode(", ", $item['reasons'])."</td>";
+        $html .= "<td style='padding:10px; text-align:right;'>
+                    <div style='display:flex; gap:5px; justify-content:flex-end;'>
+                        <a href='$fileUrl' target='_blank' class='btn' style='padding:4px 8px; font-size:10px; background:var(--accent); border:none;'>CHECK URL</a>
+                        <a href='?path=".urlencode($dir)."&delete=".urlencode($item['name'])."' onclick='return confirm(\"Delete this file?\")' class='btn' style='padding:4px 8px; font-size:10px; background:var(--danger); border:none;'>DELETE</a>
+                    </div>
+                  </td>";
+        $html .= "</tr>";
+    }
+    $html .= "</table></div>";
+    $scan_result = $html;
+}
+?>
